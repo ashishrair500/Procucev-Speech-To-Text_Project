@@ -41,7 +41,6 @@ class Settings(BaseSettings):
     max_session_seconds: int = 900
     max_concurrent_sessions: int = 4
     max_transcript_chars: int = 50_000
-    ws_ping_interval_seconds: int = 20
 
     @property
     def origins_list(self) -> list[str]:
