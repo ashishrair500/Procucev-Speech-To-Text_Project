@@ -32,3 +32,5 @@ htmlcov/
 *.aiff
 *.pcm
 !static/*.wav
+.neon
+node_modules/
