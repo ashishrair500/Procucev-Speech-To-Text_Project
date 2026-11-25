@@ -1,0 +1,11 @@
+# Runtime dependencies (pinned to versions verified on this machine).
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+sqlalchemy[asyncio]==2.1.9
+asyncpg==0.32.0
+aiosqlite==0.22.1
+pydantic==2.14.4
+pydantic-settings==2.16.3
+python-dotenv==1.2.4
+google-genai==3.6.1
+websockets==17.4
