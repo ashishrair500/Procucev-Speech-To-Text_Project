@@ -7,10 +7,20 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # --- Secrets: set these in the Render dashboard (sync: false) ---------
       - key: GEMINI_API_KEY
-        sync: false # set the real key in the Render dashboard
+        sync: false
+      # Pooled endpoint: application query traffic.
       - key: DATABASE_URL
-        sync: false # paste the Neon connection string here
+        sync: false
+      # Direct endpoint: schema DDL/migrations (PgBouncer cannot run them).
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # Set to https://<service-name>.onrender.com once the URL is known.
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # --- Non-secret defaults ---------------------------------------------
       - key: GEMINI_LIVE_MODEL
         value: gemini-3.5-transcribe-live
       - key: GEMINI_FALLBACK_MODELS
@@ -23,3 +33,5 @@ services:
         value: "900"
       - key: MAX_CONCURRENT_SESSIONS
         value: "4"
+      - key: MAX_TRANSCRIPT_CHARS
+        value: "50000"
