@@ -17,5 +17,6 @@ COPY static ./static
 
 EXPOSE 8000
 
-# Single worker: the WebSocket session counter is per-process.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Bind to $PORT when the platform provides one (Render sets PORT, default 10000).
+# Falls back to 8000 for local Docker / docker-compose.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
