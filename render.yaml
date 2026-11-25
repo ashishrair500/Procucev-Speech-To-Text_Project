@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: hinglish-stt
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # set the real key in the Render dashboard
+      - key: DATABASE_URL
+        sync: false # paste the Neon connection string here
+      - key: GEMINI_LIVE_MODEL
+        value: gemini-3.5-transcribe-live
+      - key: GEMINI_FALLBACK_MODELS
+        value: gemini-3.1-flash-live-preview,gemini-3.8-live
+      - key: GEMINI_API_VERSION
+        value: v1beta
+      - key: ENVIRONMENT
+        value: production
+      - key: MAX_SESSION_SECONDS
+        value: "900"
+      - key: MAX_CONCURRENT_SESSIONS
+        value: "4"
