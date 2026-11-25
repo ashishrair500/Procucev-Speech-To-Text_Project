@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
+    AsyncEngine,
     async_sessionmaker,
     create_async_engine,
 )
@@ -23,10 +24,10 @@ def normalize_database_url(url: str) -> tuple[str, dict]:
     break the async driver:
 
     * the bare ``postgresql://`` scheme selects psycopg2, not asyncpg;
-    * asyncpg rejects the libpq ``sslmode`` parameter outright.
+    * asyncpg rejects the libpq ``sslmode`` and ``channel_binding`` parameters.
 
-    Neon's PgBouncer pooler additionally cannot use asyncpg's prepared-statement
-    cache, so the cache is disabled for pooler hostnames.
+    Neon's PgBouncer pooler runs in transaction mode and cannot use asyncpg's
+    prepared-statement cache, so the cache is disabled for pooler hostnames.
     """
     connect_args: dict = {}
 
@@ -60,15 +61,34 @@ def normalize_database_url(url: str) -> tuple[str, dict]:
     return normalized, connect_args
 
 
-_database_url, _connect_args = normalize_database_url(settings.database_url)
+def pick_migration_url(pooled: str, unpooled: str | None) -> str:
+    """Choose the URL used for DDL — the direct endpoint when we have one.
 
-engine = create_async_engine(
-    _database_url,
-    echo=False,
-    pool_pre_ping=True,
-    future=True,
-    connect_args=_connect_args,
-)
+    Neon's pooled connection routes through PgBouncer in transaction mode, so
+    schema operations (``CREATE TABLE``, Alembic, ``pg_dump``) belong on the
+    direct endpoint. Falls back to the pooled URL when no direct one is set.
+    """
+    return unpooled or pooled
+
+
+def _build_engine(url: str) -> AsyncEngine:
+    normalized, connect_args = normalize_database_url(url)
+    return create_async_engine(
+        normalized,
+        echo=False,
+        pool_pre_ping=True,
+        future=True,
+        connect_args=connect_args,
+    )
+
+
+# Application query traffic.
+engine = _build_engine(settings.database_url)
+
+# Schema DDL. Reuse the application engine when both URLs are the same object
+# so we do not open a second pool for the common local/SQLite case.
+_migration_url = pick_migration_url(settings.database_url, settings.database_url_unpooled)
+migration_engine = engine if _migration_url == settings.database_url else _build_engine(_migration_url)
 
 SessionLocal = async_sessionmaker(
     bind=engine,
@@ -89,9 +109,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_models() -> None:
-    """Create tables on startup (Alembic can replace this later)."""
+    """Create tables on startup (Alembic can replace this later).
+
+    Runs on the direct endpoint so it works with a pooled Neon URL.
+    """
     # Import models so they are registered on Base.metadata before create_all.
     from app import models  # noqa: F401
 
-    async with engine.begin() as conn:
+    async with migration_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def dispose_engines() -> None:
+    await migration_engine.dispose()
+    if migration_engine is not engine:
+        await engine.dispose()

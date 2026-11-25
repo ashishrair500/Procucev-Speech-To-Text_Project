@@ -116,3 +116,14 @@ async def test_health_ok(client):
     assert "database" in body
     assert isinstance(body["models"], list)
     assert body["models"][0] == "gemini-3.5-transcribe-live"
+
+
+def test_health_endpoint_has_a_live_engine_reference():
+    """Regression guard: /health calls engine.connect(), so main must import it.
+
+    Dropping the import made /health silently report `degraded` with a NameError.
+    """
+    import app.database as database
+    import app.main as main_module
+
+    assert main_module.engine is database.engine

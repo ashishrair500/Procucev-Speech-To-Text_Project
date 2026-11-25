@@ -9,7 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # .env.local is written by the Neon CLI and overrides .env
+        env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -26,9 +27,13 @@ class Settings(BaseSettings):
     gemini_fallback_models: str = "gemini-3.1-flash-live-preview,gemini-3.8-live"
 
     # --- Database -------------------------------------------------------
+    # Application traffic: the pooled endpoint is correct here.
     database_url: str = (
         "postgresql+asyncpg://postgres:postgres@localhost:5432/transcriptions"
     )
+    # Schema migrations / DDL: the direct (non-pooled) endpoint. Neon's pooled
+    # PgBouncer runs in transaction mode and does not support session state.
+    database_url_unpooled: str | None = None
 
     # --- HTTP / WebSocket limits ---------------------------------------
     allowed_origins: str = "*"

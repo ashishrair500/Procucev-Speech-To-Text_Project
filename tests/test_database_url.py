@@ -6,7 +6,7 @@ consume as-is; these cases lock in the translation.
 
 from __future__ import annotations
 
-from app.database import normalize_database_url
+from app.database import normalize_database_url, pick_migration_url
 
 
 def test_bare_postgres_scheme_is_rewritten_for_asyncpg():
@@ -63,3 +63,18 @@ def test_already_async_url_is_left_alone():
     url, args = normalize_database_url("postgresql+asyncpg://u:p@host:5432/db")
     assert url == "postgresql+asyncpg://u:p@host:5432/db"
     assert args == {}
+
+
+# --- DDL endpoint selection (Neon pooled vs direct) ------------------------
+
+
+def test_migration_url_prefers_the_direct_endpoint():
+    pooled = "postgresql://u:p@ep-x-pooler.r.aws.neon.tech/neondb"
+    direct = "postgresql://u:p@ep-x.r.aws.neon.tech/neondb"
+    assert pick_migration_url(pooled, direct) == direct
+
+
+def test_migration_url_falls_back_to_pooled_when_direct_is_absent():
+    pooled = "postgresql://u:p@ep-x-pooler.r.aws.neon.tech/neondb"
+    assert pick_migration_url(pooled, None) == pooled
+    assert pick_migration_url(pooled, "") == pooled

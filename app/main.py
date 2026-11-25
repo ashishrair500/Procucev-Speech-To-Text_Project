@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from app import schemas
 from app.config import settings
-from app.database import engine, init_models
+from app.database import dispose_engines, engine, init_models
 from app.routers import transcriptions, ws
 
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001 - don't crash the app if DB is down
         logger.warning("could not initialise database: %s", exc)
     yield
-    await engine.dispose()
+    await dispose_engines()
 
 
 app = FastAPI(
