@@ -24,6 +24,8 @@ Stack: **Python (FastAPI) · PostgreSQL · Gemini Live API**.
 - **Language hint** dropdown (Hindi + English mixed / English only / Hindi only).
 - Automatic **reconnect** if the Gemini session drops, and clear error messages
   for denied mic permission, lost connection or quota limits.
+- **Light, responsive interface** — left-aligned editorial layout, a single teal
+  accent, hairline rules instead of cards, and a stacked table view down to 360 px.
 
 > **Note on the assignment text:** the brief says "Text to Speech", which is
 > almost certainly a typo for **Speech to Text**. The whole task converts voice
@@ -67,6 +69,10 @@ Stack: **Python (FastAPI) · PostgreSQL · Gemini Live API**.
 must never ship to the browser, where anyone could read it from the page source
 and burn your quota. The browser talks to your server; your server talks to Gemini.
 
+**In production** the database is **Neon Postgres**. Application query traffic
+goes through the pooled endpoint and schema DDL goes through the direct endpoint
+(the reason is in section 3). Locally, docker-compose runs PostgreSQL 16 instead.
+
 **Key components**
 
 | Piece | File | Responsibility |
@@ -87,13 +93,13 @@ and burn your quota. The browser talks to your server; your server talks to Gemi
 |---|---|---|
 | Speech-to-text | **Gemini Live API** (`gemini-3.5-transcribe-live`) | Truly streaming, handles Hinglish well, no GPU/model hosting |
 | Backend | **FastAPI** | Native WebSocket support, simple REST, automatic API docs |
-| Database | **PostgreSQL 16** | Relational, free hosted options (Neon/Supabase) |
+| Database | **PostgreSQL** (16 in local Docker, 18 on Neon) | Relational, free hosted options (Neon/Supabase) |
 | ORM | **SQLAlchemy 2 (async)** | Standard, works with Postgres and SQLite (tests) |
-| Frontend | **Plain HTML/CSS/JS** | No build step, easy to deploy, enough for a mic and a table |
+| Frontend | **Plain HTML/CSS/JS** | No build step and nothing to ship; a light editorial theme (Fraunces / DM Sans / IBM Plex Mono, one teal accent) with no UI framework |
 | Browser audio | **Web Audio API + AudioWorklet** | Produces the exact PCM format Gemini Live expects |
 | Packaging | **Docker + docker-compose** | One-command local setup; required by most free hosts |
 
-### Two implementation details worth knowing
+### Three implementation details worth knowing
 
 - **`api_version` must be pinned to `v1beta`.** `google-genai` 3.6.1 defaults to
   `v1`, but the Live websocket endpoint only exists on `v1beta`/`v1alpha` — with
@@ -103,6 +109,13 @@ and burn your quota. The browser talks to your server; your server talks to Gemi
   panel *replaces* the text on each event instead of appending. The final
   `input_transcription` is the authoritative complete transcript, and it is
   followed by `generation_complete`.
+- **Queries use the pooled database URL; schema DDL uses the direct one.** Neon's
+  pooled endpoint runs PgBouncer in transaction mode, which cannot run schema
+  operations. So `app/database.py` builds two engines and runs `CREATE TABLE` on
+  `DATABASE_URL_UNPOOLED`. It also rewrites the provider's libpq URL for asyncpg:
+  the bare `postgresql://` scheme is switched to `+asyncpg`, `sslmode` becomes a
+  connect arg, `channel_binding` is dropped (asyncpg rejects it), and the
+  prepared-statement cache is disabled on `-pooler` hosts.
 
 ### About the model name
 
@@ -133,8 +146,9 @@ One table is enough for the core brief.
 | `updated_at` | Timestamp (tz) | updated on every edit |
 
 Indexes on `created_at` and `title` keep the history list fast. Search is a
-case-insensitive `LIKE` on `title` and `text`. Tables are created automatically
-on startup; Alembic can replace this later.
+case-insensitive `LIKE` on `title` and `text`. Tables are created automatically on
+startup (`create_all`) on the **direct** database URL, since PgBouncer's
+transaction pooling cannot run schema DDL; Alembic can replace this later.
 
 ---
 
@@ -208,7 +222,8 @@ Only the **names** are listed here; never commit real values. Copy
 | `GEMINI_LIVE_MODEL` | — | `gemini-3.5-transcribe-live` | primary Live model |
 | `GEMINI_FALLBACK_MODELS` | — | `gemini-3.1-flash-live-preview,gemini-3.8-live` | tried on failure |
 | `GEMINI_API_VERSION` | — | `v1beta` | **must be `v1beta`** for the Live endpoint |
-| `DATABASE_URL` | ✅ | localhost Postgres | SQLAlchemy async URL |
+| `DATABASE_URL` | ✅ | compose `db` service | SQLAlchemy async URL for **all query traffic** (the pooled endpoint on Neon) |
+| `DATABASE_URL_UNPOOLED` | — | falls back to `DATABASE_URL` | **direct** endpoint, used for schema DDL at startup |
 | `ENVIRONMENT` | — | `development` | shown in `/health` |
 | `ALLOWED_ORIGINS` | — | `*` | CORS / WebSocket origin allow-list |
 | `MAX_SESSION_SECONDS` | — | `900` | hard cap per recording |
@@ -279,13 +294,15 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Ten tests cover create, defaults, read, `404`, empty/oversized input (`422`),
-pagination, search (title and text), update, delete, and `/health`. They run
-against a **throwaway SQLite database**, so no Postgres or Gemini key is needed.
+21 tests cover create, defaults, read, `404`, empty/oversized input (`422`),
+pagination, search (title and text), update, delete, `/health`, database-URL
+normalisation, the pooled/direct DDL split, and a regression guard for the
+`/health` engine reference. They run against a **throwaway SQLite database**, so
+no Postgres or Gemini key is needed.
 
 ```
-..........                                                               [100%]
-10 passed
+.....................                                                    [100%]
+21 passed
 ```
 
 Manual test areas (per the brief) are listed in section 11.
@@ -330,19 +347,46 @@ Recommended: **Render (app) + Neon (database)** — both have free plans, provid
 HTTPS, and Render supports WebSockets.
 
 1. **Push** this repo to GitHub at
-   `ashishrair500/Procucev-Speech-To-Text_Project` (secrets stay out — `.gitignore`
-   excludes `.env`).
-2. **Create a Neon database** and copy its connection string.
-3. **Create a Render web service** from the repo; it will read `render.yaml`
-   (Docker runtime) or you can pick Docker manually. Health check path: `/health`.
-4. **Add environment variables** in Render: `GEMINI_API_KEY`, `DATABASE_URL`
-   (the Neon string), `GEMINI_LIVE_MODEL`, `GEMINI_API_VERSION=v1beta`,
-   `ALLOWED_ORIGINS` (your Render URL).
-5. **Deploy**, open the HTTPS link, allow the microphone, and speak a mixed
-   sentence. Confirm saving, editing and deleting work against the hosted DB.
+   `ashishrair500/Procucev-Speech-To-Text_Project` (secrets stay out —
+   `.gitignore` excludes `.env`).
+2. **Provision Neon Postgres.** Click through the Neon console, or use the Neon
+   CLI to link the project and pull the credentials straight into `.env`:
 
-`render.yaml` already declares the service and variables, so steps 3–4 are mostly
-clicking **Apply**.
+   ```bash
+   npm i -g neon@latest
+   neon login
+   neon init -y --org-id <org-id> --project-id <project-id> \
+             --branch production --services postgres
+   neon deploy
+   ```
+
+   You need **both** strings it writes: `DATABASE_URL` (pooled) and
+   `DATABASE_URL_UNPOOLED` (direct). Strip any surrounding quotes before pasting
+   them into Render — Render treats quotes as part of the value.
+3. **Create a Render web service** from the repo. It reads `render.yaml`
+   (Docker runtime, free plan, health check `/health`), or you can pick Docker
+   manually in the dashboard.
+4. **Add the four secrets** (the blueprint marks them `sync: false`, so Render
+   prompts for them):
+
+   | Variable | Value |
+   |---|---|
+   | `GEMINI_API_KEY` | your AI Studio key |
+   | `DATABASE_URL` | Neon **pooled** connection string |
+   | `DATABASE_URL_UNPOOLED` | Neon **direct** connection string |
+   | `ALLOWED_ORIGINS` | `*` for the first deploy, then your Render URL |
+
+   `render.yaml` supplies everything else (`GEMINI_LIVE_MODEL`,
+   `GEMINI_API_VERSION=v1beta`, the limits, and so on).
+5. **Deploy**, open the HTTPS link, allow the microphone, and speak a mixed
+   sentence. Confirm saving, editing and deleting work against the hosted
+   database. Then set `ALLOWED_ORIGINS` to
+   `https://<service-name>.onrender.com` and redeploy to lock down the CORS and
+   WebSocket origin checks.
+
+> **Do not set `PORT`.** Render assigns it (default `10000`) and **fails the
+> deploy** if it cannot detect the bound port, so the `Dockerfile` starts Uvicorn
+> on `${PORT:-8000}` — 8000 remains the default for local Docker and compose.
 
 ### Free-tier caveats (worth knowing for the demo)
 
@@ -366,9 +410,12 @@ clicking **Apply**.
 | Browsers | Chrome and Edge on desktop, Chrome on Android |
 | Deployed app | all of the above on the live HTTPS link |
 
-**Verified on this machine:** all 10 API tests pass; the WebSocket pipeline
-saved real transcripts; the dashboard renders with no console errors; search,
-pagination and the view/edit dialogs work (checked in Chromium).
+**Verified on this machine:** all 21 tests pass; the WebSocket pipeline saved
+real transcripts end to end against **both** local PostgreSQL and **Neon**; CRUD
+was exercised against Neon over REST (`201/200/200/204/404`); the Docker image
+builds and honours `$PORT` (verified by running it with `PORT=9000`); the
+dashboard renders with no console errors; search, pagination and the view/edit
+dialogs work (checked in Chromium).
 
 ---
 
@@ -409,7 +456,7 @@ vendor independence, and a background queue for saving.
 ├── app/
 │   ├── main.py                 # FastAPI app, /health, static serving
 │   ├── config.py               # settings from env
-│   ├── database.py             # async engine, session, base
+│   ├── database.py             # two engines (pooled queries, direct DDL), URL normalisation
 │   ├── models.py               # transcriptions table
 │   ├── schemas.py              # pydantic models
 │   ├── crud.py                 # DB operations
@@ -427,10 +474,13 @@ vendor independence, and a background queue for saving.
 │   ├── gemini_live_test.py     # standalone Gemini smoke test
 │   ├── ws_smoke.py             # end-to-end WebSocket test
 │   └── language_test.py        # Hinglish accuracy matrix
-├── tests/                      # pytest API tests
-├── Dockerfile
-├── docker-compose.yml
+├── tests/                      # pytest API + database-URL tests
+├── Dockerfile                  # binds $PORT, falls back to 8000
+├── docker-compose.yml          # local app + PostgreSQL 16
 ├── requirements.txt / requirements-dev.txt
 ├── render.yaml                 # Render deploy blueprint
+├── neon.ts                     # Neon config-as-code policy (Postgres only)
+├── package.json                # dependencies for neon.ts (@neon/config, @neon/env)
+├── .neon                       # linked Neon org / project / branch (git-ignored)
 └── .env.example
 ```
